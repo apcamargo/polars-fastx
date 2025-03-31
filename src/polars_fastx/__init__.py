@@ -1,0 +1,1 @@
+from polars_fastx.fastx_parsers import scan_fastx
