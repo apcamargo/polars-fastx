@@ -3,10 +3,45 @@ name = "polars-fastx"
 version = "0.1.0"
 description = "A Polars plugin for parsing FASTA and FASTQ files into DataFrames"
 readme = "README.md"
-authors = [{ name = "Antonio Camargo", email = "antoniop.camargo@gmail.com" }]
+authors = [{ name = "Antonio Camargo", email = "antoniop.camargo@gmail.com" }, { name = "Uri Neri", email = "uri.neri@gmail.com" }]
 requires-python = ">=3.9"
 dependencies = ["needletail>=0.6.3,<0.7.0", "polars>=1.4.0,<2.0.0"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+build = ["hatch >=1.14.0,<2", "pip >=25.0.1,<26"]
+format = ["ruff >=0.11.3,<0.12"]
+publish = ["twine >=6.1.0,<7"]
+
+[tool.hatch.version]
+path = "src/polars_fastx/__init__.py"
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.feature.py39.dependencies]
+python = "~=3.9.0"
+
+[tool.pixi.pypi-dependencies]
+polars-fastx = { path = ".", editable = true }
+
+[tool.pixi.environments]
+default = { features = ["py39"] }
+dev = { features = ["build", "format", "publish"] }
+
+[tool.pixi.tasks]
+test-import = "python -c 'import polars_fastx; print(polars_fastx.__version__)'"
+
+[tool.pixi.dependencies]
+ipython = ">=8.18.1,<10"
+
+[tool.pixi.feature.format.tasks]
+format = "ruff check --select I --fix src && ruff format src"
+
+[tool.pixi.feature.build.tasks]
+build-pypi = "hatch build"
+
