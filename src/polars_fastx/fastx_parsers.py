@@ -1,9 +1,10 @@
 from pathlib import Path
 import sys
-from typing import  Optional, Union
+from typing import  Optional, Union, Iterator
 from collections import defaultdict
 
 import polars as pl
+from polars.io.plugins import register_io_source
 from needletail import parse_fastx_file
 
 # Register custom expressions for sequence analysis
@@ -65,8 +66,9 @@ class SequenceExpr:
             lambda x: _calc_kmers(x, k), return_dtype=pl.Struct
         )
 
+
 @pl.api.register_lazyframe_namespace("from_fastx")
-def init(input_file: Union[str, Path], batch_size: int = 512) -> pl.LazyFrame:
+def init(input_file: Union[str, Path]) -> pl.LazyFrame:
     """Scan a FASTA/FASTQ file into a lazy polars DataFrame.
 
     This function extends polars with the ability to lazily read FASTA/FASTQ files.
@@ -82,41 +84,54 @@ def init(input_file: Union[str, Path], batch_size: int = 512) -> pl.LazyFrame:
             - sequence: Sequences (str) # TODO: maybe somehow move to largeutf8?
             - quality: Quality scores (only for FASTQ)
     """
-    def file_has_quality(file: Union[str, Path]) -> bool:
-        first_record = next(parse_fastx_file(file))
-        return first_record.qual is not None
+    reader = parse_fastx_file(input_file)
+    has_quality = True if next(reader).is_fastq() else False
 
-    has_quality = file_has_quality(input_file)
     if has_quality:
         schema = pl.Schema({"header": pl.String, "sequence": pl.String, "quality": pl.String})
     else:
         schema = pl.Schema({"header": pl.String, "sequence": pl.String})
 
-    def read_chunks():
+    def source_generator(
+        with_columns: Optional[list] ,
+        predicate: Optional[pl.Expr] ,
+        n_rows: Optional[int] ,
+        batch_size: Optional[int] ,
+    ) -> Iterator[pl.LazyFrame]:
+        if batch_size is None:
+            batch_size = 512
+
         reader = parse_fastx_file(input_file)
-        while True:
-            chunk = []
+        # print (n_rows)
+        # print ("here")
+        while n_rows is None or n_rows > 0:
+            if n_rows is not None:
+                batch_size = min(batch_size, n_rows)
+            rows = []
             for _ in range(batch_size):
                 try:
                     record = next(reader)
-                    row = [record.id, record.seq]
-                    if has_quality:
-                        row.append(record.qual)
-                    chunk.append(row)
+                    row = [record.id, record.seq, record.qual]
                 except StopIteration:
-                    if chunk:
-                        yield pl.LazyFrame(chunk, schema=schema, orient="row")
-                    return
-            yield pl.LazyFrame(chunk, schema=schema, orient="row")
+                    n_rows = 0
+                    break
+                rows.append(row)
+            df = pl.from_records(rows, schema=schema, orient="row")
+            # print (df.shape)
+            if n_rows:
+                n_rows -= df.height
+            if with_columns is not None:
+                df = df.select(with_columns)
+            if predicate is not None:
+                df = df.filter(predicate)
+            yield df
 
-    return pl.concat(read_chunks(), how="vertical")
-
+    return register_io_source(io_source=source_generator,schema=schema)
 
 
 @pl.api.register_dataframe_namespace("from_fastx")
 def init(file: Union[str, Path], batch_size: int = 512) -> pl.DataFrame:
     return pl.LazyFrame.from_fastx(file, batch_size).collect()
-
 
 ### example usage
 def fasta_stats(
@@ -206,3 +221,47 @@ def fasta_stats(
 
     df.write_csv(output_path, separator="\t")
     print("Successfully wrote file after converting data types")
+
+
+# this one is complex but works...
+# def parse_fasta_lazy(file_path: str) -> pl.LazyFrame:
+#     # Read the whole file as a single column of lines
+#     txt = pl.scan_csv(
+#         file_path,
+#         # treat every line as a string column called "line"
+#         has_header=False,
+#         separator="\n",
+#                # read line‑by‑line
+#         comment_prefix=None,   # we don't want Polars to skip anything
+#         infer_schema=False,
+#         schema={"line": pl.Utf8}
+#     )#.select(pl.col("column_1").alias("line"))
+
+#     # Group lines into blocks that start with '>'
+#     # The trick: compute a cumulative sum that increments on header lines.
+#     # All lines belonging to the same record get the same group id.
+#     block_id = (pl.col("line").str.starts_with(">")).cum_sum()
+#     block = txt.with_columns(block_id.alias("block"))
+
+#     # Aggregate each block into a struct of (header, seq)
+#     # `agg_list` collects all lines in the same block into a list.
+#     agg = (
+#         block
+#         .group_by("block")
+#         .agg(pl.concat_list(pl.col("line")).alias("lines"))
+#         ) #.collect()
+#     agg = (
+#         block
+#         .group_by("block")
+#         .agg(pl.col("line"))
+#         )# .collect()
+#     agg = agg.select(
+#             # first line (item) is the header, the rest SHOULD be (seq)
+#             pl.col("line").list.first().str.slice(1).alias("header"),
+#             pl.col("line").list.gather_every(1,1).list.join("").alias("seq")
+#         )# ["seq"][1].to_list()
+#     return agg
+
+# lf = parse_fasta_lazy("/home/neri/Documents/projects/YNP/reps_side2_mot1.fas")
+# df = lf.collect()
+# print(df.head())
