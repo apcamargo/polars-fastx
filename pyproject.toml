@@ -5,7 +5,7 @@ description = "A Polars plugin for parsing FASTA and FASTQ files into DataFrames
 readme = "README.md"
 authors = [{ name = "Antonio Camargo", email = "antoniop.camargo@gmail.com" }, { name = "Uri Neri", email = "uri.neri@gmail.com" }]
 requires-python = ">=3.9"
-dependencies = ["needletail>=0.6.3,<0.7.0", "polars>=1.4.0,<2.0.0"]
+dependencies = ["needletail>=0.7.0,<0.8", "polars>=1.4.0,<2.0.0"]
 
 [build-system]
 requires = ["hatchling"]
